@@ -1,0 +1,13 @@
+--extra-index-url https://download.pytorch.org/whl/cu121
+torch>=2.0.0
+torchvision
+torchaudio
+lightning>=2.2
+diffusers
+lpips
+wandb
+einops
+av
+timm
+opencv-python
+numpy
