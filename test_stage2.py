@@ -19,7 +19,7 @@ def denormalize(tensor):
 # "baseball_swing", "golf_swing", "tennis_forehand",
 # "jumping_jacks", "tennis_serve", "squats"
 
-TARGET_ACTION = "tennis_serve"  # Change this string to test different actions!
+TARGET_ACTION = "baseball_swing"  # Change this string to test different actions!
 
 def main():
     torch.set_grad_enabled(False)
