@@ -1,6 +1,7 @@
 import os
 import cv2
 import numpy as np
+import scipy.io
 import torch
 from torch.utils.data import Dataset
 from torchvision import transforms
@@ -49,6 +50,11 @@ class VideoFramePairDataset(Dataset):
             return
 
         video_dirs = sorted(os.listdir(frames_dir))
+        
+        import random
+        rng = random.Random(42)
+        rng.shuffle(video_dirs)
+        
         n = len(video_dirs)
         video_dirs = video_dirs[:int(n * 0.9)] if split == "train" else video_dirs[int(n * 0.9):]
 
@@ -57,7 +63,14 @@ class VideoFramePairDataset(Dataset):
             frames   = sorted(os.listdir(vid_path))
             if len(frames) < 2:
                 continue
+
             action_idx = 0
+            label_path = os.path.join(data_root, "labels", f"{vid}.mat")
+            if os.path.exists(label_path):
+                mat = scipy.io.loadmat(label_path)
+                act_str = str(mat.get("action", [""])[0])
+                if act_str in self.ACTION2IDX:
+                    action_idx = self.ACTION2IDX[act_str]
 
             max_pairs = min(len(frames) - 1, 20)
             for i in range(max_pairs):
@@ -90,5 +103,77 @@ class VideoFramePairDataset(Dataset):
         return {
             "ref"    : self.transform(ref),
             "tgt"    : self.transform(tgt),
+            "action" : torch.tensor(action_idx, dtype=torch.long),
+        }
+
+class VideoSequenceDataset(Dataset):
+    def __init__(self, data_root, seq_len=32, img_size=128, split="train"):
+        self.img_size = img_size
+        self.seq_len  = seq_len
+        self.samples  = [] # list of (list_of_frame_paths, action_idx)
+
+        self.transform = transforms.Compose([
+            transforms.ToPILImage(),
+            transforms.Resize((img_size, img_size)),
+            transforms.ToTensor(),
+            transforms.Normalize([0.5]*3, [0.5]*3),
+        ])
+
+        self._build_samples(data_root, split)
+
+    def _build_samples(self, data_root, split):
+        frames_dir = os.path.join(data_root, "frames")
+        if not os.path.exists(frames_dir):
+            print(f"WARNING: {frames_dir} not found. Using dummy data.")
+            return
+
+        video_dirs = sorted(os.listdir(frames_dir))
+        
+        import random
+        rng = random.Random(42)
+        rng.shuffle(video_dirs)
+        
+        n = len(video_dirs)
+        video_dirs = video_dirs[:int(n * 0.9)] if split == "train" else video_dirs[int(n * 0.9):]
+
+        for vid in video_dirs:
+            vid_path = os.path.join(frames_dir, vid)
+            frames   = sorted(os.listdir(vid_path))
+            if len(frames) < self.seq_len:
+                continue
+
+            action_idx = 0
+            label_path = os.path.join(data_root, "labels", f"{vid}.mat")
+            if os.path.exists(label_path):
+                mat = scipy.io.loadmat(label_path)
+                act_str = str(mat.get("action", [""])[0])
+                if act_str in VideoFramePairDataset.ACTION2IDX:
+                    action_idx = VideoFramePairDataset.ACTION2IDX[act_str]
+
+            frame_paths = [os.path.join(vid_path, f) for f in frames[:self.seq_len]]
+            self.samples.append((frame_paths, action_idx))
+
+        print(f"Built {len(self.samples)} video sequences")
+
+    def __len__(self):
+        return max(len(self.samples), 100)
+
+    def __getitem__(self, idx):
+        if not self.samples:
+            H = W = self.img_size
+            return {
+                "frames" : torch.randn(self.seq_len, 3, H, W),
+                "action" : torch.tensor(0, dtype=torch.long),
+            }
+
+        frame_paths, action_idx = self.samples[idx % len(self.samples)]
+        
+        frames_tensor = []
+        for path in frame_paths:
+            img = cv2.cvtColor(cv2.imread(path), cv2.COLOR_BGR2RGB)
+            frames_tensor.append(self.transform(img))
+            
+        return {
+            "frames" : torch.stack(frames_tensor, dim=0),
             "action" : torch.tensor(action_idx, dtype=torch.long),
         }

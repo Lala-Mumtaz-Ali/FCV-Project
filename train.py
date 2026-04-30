@@ -2,6 +2,7 @@ import torch
 import lightning as L
 from models.detector import KeypointDetector
 from models.translator import KeypointGuidedTranslator
+from models.classifier import ActionClassifier
 from loss import PatchDiscriminator, CombinedLoss
 from utils import keypoints_to_gaussian_maps
 
@@ -83,3 +84,67 @@ class Stage1Module(L.LightningModule):
             lr=self.cfg["lr_d"], betas=(0.5, 0.999),
         )
         return [opt_g, opt_d]
+
+class Stage2Module(L.LightningModule):
+    def __init__(self, cfg, stage1_ckpt_path=None):
+        super().__init__()
+        self.cfg = cfg
+        
+        # Load Stage 1 detector and freeze it
+        self.detector = KeypointDetector(
+            K=cfg["K"],
+            img_size=cfg["img_size"],
+            sigma=cfg["sigma"],
+            vit_model=cfg["vit_model"],
+        )
+        if stage1_ckpt_path:
+            s1_module = Stage1Module.load_from_checkpoint(stage1_ckpt_path, cfg=cfg)
+            self.detector.load_state_dict(s1_module.detector.state_dict())
+            
+        for p in self.detector.parameters():
+            p.requires_grad = False
+        self.detector.eval()
+            
+        self.classifier = ActionClassifier(
+            K=cfg["K"],
+            d_model=cfg["d_model"],
+            nhead=cfg["nhead"],
+            num_layers=cfg["num_layers"],
+            num_actions=cfg["num_actions"]
+        )
+        
+        self.loss_fn = torch.nn.CrossEntropyLoss()
+
+    def training_step(self, batch, batch_idx):
+        frames = batch["frames"].to(self.device)  # (B, seq_len, 3, H, W)
+        action = batch["action"].to(self.device)  # (B,)
+        
+        B, seq_len, C, H, W = frames.shape
+        frames_flat = frames.view(B * seq_len, C, H, W)
+        
+        with torch.no_grad():
+            self.detector.eval()
+            keypoints, _ = self.detector(frames_flat)
+            
+        keypoints = keypoints.view(B, seq_len, self.cfg["K"], 2)
+        
+        logits = self.classifier(keypoints)
+        loss = self.loss_fn(logits, action)
+        
+        preds = torch.argmax(logits, dim=1)
+        acc = (preds == action).float().mean()
+        
+        self.log_dict({
+            "s2/loss": loss,
+            "s2/acc": acc
+        }, prog_bar=True)
+        
+        return loss
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.AdamW(
+            self.classifier.parameters(),
+            lr=self.cfg.get("lr_s2", 1e-4),
+            weight_decay=1e-4
+        )
+        return optimizer
