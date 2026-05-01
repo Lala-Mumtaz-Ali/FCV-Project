@@ -1,56 +1,81 @@
 import torch
 import torch.nn as nn
 
+
 class ActionClassifier(nn.Module):
-    def __init__(self, K=40, d_model=256, nhead=8, num_layers=4, num_actions=9):
+    """
+    Transformer-based action classifier over a sequence of keypoint frames.
+
+    Improvements over the original:
+      - Learnable CLS token used for classification (instead of mean pooling).
+        This is the standard ViT/BERT approach and lets the model learn what
+        temporal context to aggregate.
+      - Deeper MLP classification head with dropout for regularisation.
+      - Dropout inside the Transformer encoder layers.
+    """
+
+    def __init__(self, K=40, d_model=256, nhead=8, num_layers=4,
+                 num_actions=15, dropout=0.1):
         super().__init__()
-        # Input keypoints shape: (B, seq_len, K, 2)
-        # We flatten K*2 -> project to d_model
+
+        # Input projection: flatten K keypoints × 2 coords → d_model
         self.input_proj = nn.Linear(K * 2, d_model)
-        
-        # Positional embedding for sequence length
-        # Assuming seq_len <= 100 for safety
-        self.pos_embed = nn.Parameter(torch.randn(1, 100, d_model))
-        
+
+        # Learnable CLS token prepended to the sequence
+        self.cls_token = nn.Parameter(torch.randn(1, 1, d_model))
+
+        # Positional embedding: seq_len + 1 (for CLS) positions
+        # Supports up to 101 positions (100 frames + CLS)
+        self.pos_embed = nn.Parameter(torch.randn(1, 101, d_model))
+
         # Transformer Encoder
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model,
             nhead=nhead,
             dim_feedforward=d_model * 4,
-            dropout=0.1,
+            dropout=dropout,
             activation="gelu",
-            batch_first=True
+            batch_first=True,
+            norm_first=True,        # Pre-LN: more stable training
         )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
-        
-        # Classification head
+        self.transformer = nn.TransformerEncoder(
+            encoder_layer, num_layers=num_layers,
+            norm=nn.LayerNorm(d_model),
+        )
+
+        # Classification head: LayerNorm → Linear → GELU → Dropout → Linear
         self.head = nn.Sequential(
             nn.LayerNorm(d_model),
-            nn.Linear(d_model, num_actions)
+            nn.Linear(d_model, d_model // 2),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(d_model // 2, num_actions),
         )
 
     def forward(self, x):
         """
-        x: (B, seq_len, K, 2)
+        Args:
+            x: (B, seq_len, K, 2)  — keypoints for each frame
+        Returns:
+            logits: (B, num_actions)
         """
         B, seq_len, K, _ = x.shape
-        
-        # Flatten K and 2
+
+        # Flatten K × 2 → d_model
         x = x.view(B, seq_len, K * 2)
-        
-        # Project to d_model
-        x = self.input_proj(x)
-        
+        x = self.input_proj(x)                          # (B, seq_len, d_model)
+
+        # Prepend CLS token
+        cls = self.cls_token.expand(B, -1, -1)          # (B, 1, d_model)
+        x   = torch.cat([cls, x], dim=1)                # (B, seq_len+1, d_model)
+
         # Add positional embedding
-        x = x + self.pos_embed[:, :seq_len, :]
-        
-        # Pass through transformer
-        # x is (B, seq_len, d_model)
-        x = self.transformer(x)
-        
-        # Mean pooling over time dimension
-        x = x.mean(dim=1)
-        
-        # Classify
-        logits = self.head(x)
-        return logits
+        x = x + self.pos_embed[:, :seq_len + 1, :]
+
+        # Transformer
+        x = self.transformer(x)                         # (B, seq_len+1, d_model)
+
+        # Use only the CLS token output for classification
+        cls_out = x[:, 0, :]                            # (B, d_model)
+
+        return self.head(cls_out)                       # (B, num_actions)

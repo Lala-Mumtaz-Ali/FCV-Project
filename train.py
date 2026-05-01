@@ -1,5 +1,5 @@
 import torch
-import lightning as L
+import pytorch_lightning as L
 from models.detector import KeypointDetector
 from models.translator import KeypointGuidedTranslator
 from models.classifier import ActionClassifier
@@ -89,8 +89,8 @@ class Stage2Module(L.LightningModule):
     def __init__(self, cfg, stage1_ckpt_path=None):
         super().__init__()
         self.cfg = cfg
-        
-        # Load Stage 1 detector and freeze it
+
+        # ── Stage 1 detector ─────────────────────────────────────────
         self.detector = KeypointDetector(
             K=cfg["K"],
             img_size=cfg["img_size"],
@@ -98,53 +98,123 @@ class Stage2Module(L.LightningModule):
             vit_model=cfg["vit_model"],
         )
         if stage1_ckpt_path:
-            s1_module = Stage1Module.load_from_checkpoint(stage1_ckpt_path, cfg=cfg)
+            s1_module = Stage1Module.load_from_checkpoint(
+                stage1_ckpt_path, cfg=cfg
+            )
             self.detector.load_state_dict(s1_module.detector.state_dict())
-            
+
+        # Start fully frozen; the last ViT blocks are unfrozen after warm-up
         for p in self.detector.parameters():
             p.requires_grad = False
         self.detector.eval()
-            
+
+        # ── Classifier ───────────────────────────────────────────────
         self.classifier = ActionClassifier(
             K=cfg["K"],
             d_model=cfg["d_model"],
             nhead=cfg["nhead"],
             num_layers=cfg["num_layers"],
-            num_actions=cfg["num_actions"]
+            num_actions=cfg["num_actions"],
         )
-        
-        self.loss_fn = torch.nn.CrossEntropyLoss()
 
+        # ── Loss ─────────────────────────────────────────────────────
+        self.loss_fn = torch.nn.CrossEntropyLoss(
+            label_smoothing=cfg.get("label_smoothing", 0.1)
+        )
+
+        # Track whether the backbone has been partially unfrozen
+        self._backbone_unfrozen = False
+
+    # ── Partial backbone unfreeze ─────────────────────────────────────
+    def _unfreeze_last_vit_blocks(self, n_blocks=2):
+        """Unfreeze the last `n_blocks` transformer blocks of the ViT backbone
+        plus the heatmap head, so keypoints can be fine-tuned for action
+        discrimination.  The rest of the backbone stays frozen."""
+        # The ViT backbone blocks live at self.detector.backbone.blocks
+        blocks = list(self.detector.backbone.blocks)
+        for blk in blocks[-n_blocks:]:
+            for p in blk.parameters():
+                p.requires_grad = True
+        # Also unfreeze the heatmap projection head
+        for p in self.detector.heatmap_head.parameters():
+            p.requires_grad = True
+        self.detector.train()   # switch BN/LN to train mode for fine-tuned parts
+        print(f"[Stage 2] Unfroze last {n_blocks} ViT blocks + heatmap head ✓")
+
+    def on_train_epoch_start(self):
+        warmup = self.cfg.get("warmup_epochs_s2", 10)
+        if not self._backbone_unfrozen and self.current_epoch >= warmup:
+            self._unfreeze_last_vit_blocks(n_blocks=2)
+            self._backbone_unfrozen = True
+            # Optimizers need to be reconfigured to pick up the new params.
+            # Lightning re-uses the existing optimizer, so we manually add the
+            # new parameter group with a lower LR.
+            backbone_lr = self.cfg.get("lr_s2_backbone", 1e-5)
+            new_params = [p for p in self.detector.parameters()
+                          if p.requires_grad]
+            if new_params:
+                self.optimizers().add_param_group(
+                    {"params": new_params, "lr": backbone_lr}
+                )
+                print(f"[Stage 2] Added backbone param group "
+                      f"(lr={backbone_lr}) ✓")
+
+    # ── Training step ─────────────────────────────────────────────────
     def training_step(self, batch, batch_idx):
-        frames = batch["frames"].to(self.device)  # (B, seq_len, 3, H, W)
-        action = batch["action"].to(self.device)  # (B,)
-        
+        frames = batch["frames"].to(self.device)   # (B, seq_len, 3, H, W)
+        action = batch["action"].to(self.device)   # (B,)
+
         B, seq_len, C, H, W = frames.shape
         frames_flat = frames.view(B * seq_len, C, H, W)
-        
-        with torch.no_grad():
-            self.detector.eval()
+
+        # Run detector — use no_grad only when backbone is still frozen
+        if self._backbone_unfrozen:
             keypoints, _ = self.detector(frames_flat)
-            
+        else:
+            with torch.no_grad():
+                self.detector.eval()
+                keypoints, _ = self.detector(frames_flat)
+
         keypoints = keypoints.view(B, seq_len, self.cfg["K"], 2)
-        
+
         logits = self.classifier(keypoints)
-        loss = self.loss_fn(logits, action)
-        
-        preds = torch.argmax(logits, dim=1)
-        acc = (preds == action).float().mean()
-        
+        loss   = self.loss_fn(logits, action)
+
+        # Top-1 and top-3 accuracy
+        preds   = torch.argmax(logits, dim=1)
+        top1    = (preds == action).float().mean()
+        top3    = (torch.topk(logits, k=min(3, self.cfg["num_actions"]),
+                              dim=1).indices
+                   == action.unsqueeze(1)).any(dim=1).float().mean()
+
         self.log_dict({
             "s2/loss": loss,
-            "s2/acc": acc
-        }, prog_bar=True)
-        
+            "s2/top1": top1,
+            "s2/top3": top3,
+        }, prog_bar=True, on_step=True, on_epoch=True)
+
         return loss
 
+    # ── Optimiser + scheduler ─────────────────────────────────────────
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
             self.classifier.parameters(),
             lr=self.cfg.get("lr_s2", 1e-4),
-            weight_decay=1e-4
+            weight_decay=1e-4,
         )
-        return optimizer
+        # Cosine annealing with warm restarts
+        # T_0: restart every 20 epochs; T_mult=2 doubles the period each cycle
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            optimizer,
+            T_0=20,
+            T_mult=2,
+            eta_min=1e-6,
+        )
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "epoch",
+            },
+        }
+

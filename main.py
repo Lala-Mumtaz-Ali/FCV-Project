@@ -2,8 +2,8 @@ import os
 import argparse
 import glob
 import torch
-import lightning as L
-from lightning.pytorch.callbacks import ModelCheckpoint, TQDMProgressBar
+import pytorch_lightning as L
+from pytorch_lightning.callbacks import ModelCheckpoint, TQDMProgressBar
 from torch.utils.data import DataLoader
 
 from config import CFG, DEVICE
@@ -70,7 +70,8 @@ def main():
         print("\n--- Starting Stage 2 (Action Recognition) ---")
         # Prepare data
         train_ds = VideoSequenceDataset(
-            CFG["data_root"], CFG["seq_len"], CFG["img_size"], split="train"
+            CFG["data_root"], CFG["seq_len"], CFG["img_size"], split="train",
+            clips_per_video=CFG.get("clips_per_video", 3),
         )
         train_dl = DataLoader(
             train_ds,
@@ -95,10 +96,13 @@ def main():
 
         s2_ckpt_cb = ModelCheckpoint(
             dirpath        = CFG["ckpt_dir"],
-            filename       = "stage2-epoch{epoch:02d}",
+            filename       = "stage2-epoch{epoch:02d}-loss{s2/loss_epoch:.4f}",
+            monitor        = "s2/loss_epoch",
+            mode           = "min",
             every_n_epochs = 5,
-            save_top_k     = -1,
+            save_top_k     = 3,          # keep the 3 best checkpoints
             save_last      = True,
+            auto_insert_metric_name = False,
         )
 
         trainer_s2 = L.Trainer(
