@@ -71,7 +71,7 @@ class Stage1Module(L.LightningModule):
             "s1/recon"  : recon_loss,
             "s1/adv"    : adv_loss,
             "s1/g_loss" : g_loss,
-        }, prog_bar=True)
+        }, prog_bar=True, on_step=True, on_epoch=True)
 
     def configure_optimizers(self):
         opt_g = torch.optim.AdamW(

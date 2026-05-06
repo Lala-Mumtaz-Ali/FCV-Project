@@ -6,7 +6,7 @@ CFG = dict(
     # dataset
     data_root    = "./dataset/Penn_Action",
     img_size     = 64,
-    num_workers  = 4,
+    num_workers  = 12,
 
     # keypoints
     K            = 40,        # 40 for Penn Action, 15 for UvA-NEMO, 60 for MGIF
@@ -23,7 +23,7 @@ CFG = dict(
     # training stage 1
     lr_g         = 1e-4,
     lr_d         = 1e-4,
-    batch_size   = 16,        # fits comfortably on T4 16GB
+    batch_size   = 64,        # fits comfortably on RTX 4090 24GB
     max_epochs_s1= 50,
 
     # training stage 2

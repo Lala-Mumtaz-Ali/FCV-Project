@@ -34,21 +34,25 @@ def main():
 
         # Initialize model
         s1_module = Stage1Module(CFG)
+        
 
-        # Simple checkpoint callback
+
         s1_ckpt_cb = ModelCheckpoint(
             dirpath        = CFG["ckpt_dir"],
-            filename       = "stage1-epoch{epoch:02d}",
+            filename       = "stage1-epoch{epoch:02d}-loss{s1/g_loss_epoch:.4f}",
+            monitor        = "s1/g_loss_epoch",
+            mode           = "min",
             every_n_epochs = 5,
-            save_top_k     = -1,
+            save_top_k     = 3,          # keep the 3 best checkpoints
             save_last      = True,
+            auto_insert_metric_name = False,
         )
 
         trainer_s1 = L.Trainer(
             max_epochs       = CFG["max_epochs_s1"],
             accelerator      = "gpu" if DEVICE == "cuda" else "cpu",
             devices          = 1,
-            precision        = "16-mixed",
+            precision        = "bf16-mixed",
             callbacks        = [s1_ckpt_cb, TQDMProgressBar(refresh_rate=20)],
             default_root_dir = CFG["log_dir"],
             log_every_n_steps= 10,

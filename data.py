@@ -59,6 +59,9 @@ class VideoFramePairDataset(Dataset):
         n = len(video_dirs)
         video_dirs = video_dirs[:int(n * 0.9)] if split == "train" else video_dirs[int(n * 0.9):]
 
+        from collections import defaultdict
+        class_samples = defaultdict(list)
+
         for vid in video_dirs:
             vid_path = os.path.join(frames_dir, vid)
             frames   = sorted(os.listdir(vid_path))
@@ -83,15 +86,28 @@ class VideoFramePairDataset(Dataset):
                         action_idx = self.ACTION2IDX[act_str]
 
             max_pairs = min(len(frames) - 1, 20)
-            for i in range(max_pairs):
-                j = min(i + np.random.randint(1, self.max_gap + 1), len(frames) - 1)
-                self.samples.append((
-                    os.path.join(vid_path, frames[i]),
-                    os.path.join(vid_path, frames[j]),
-                    action_idx,
-                ))
+            if max_pairs > 0:
+                indices = np.linspace(0, len(frames) - 2, max_pairs, dtype=int)
+                for i in indices:
+                    j = min(i + np.random.randint(1, self.max_gap + 1), len(frames) - 1)
+                    class_samples[action_idx].append((
+                        os.path.join(vid_path, frames[i]),
+                        os.path.join(vid_path, frames[j]),
+                        action_idx,
+                    ))
 
-        print(f"Built {len(self.samples)} frame pairs from {len(video_dirs)} videos")
+        if class_samples:
+            max_count = max(len(samples) for samples in class_samples.values())
+            for act_idx, samples in class_samples.items():
+                if len(samples) < max_count:
+                    # Oversample minority classes to achieve even distribution
+                    extras = rng.choices(samples, k=max_count - len(samples))
+                    self.samples.extend(samples + extras)
+                else:
+                    self.samples.extend(samples)
+            rng.shuffle(self.samples)
+
+        print(f"Built {len(self.samples)} frame pairs from {len(video_dirs)} videos (balanced to {max_count} per class)")
 
     def __len__(self):
         return max(len(self.samples), 100)   # fallback for dummy mode
