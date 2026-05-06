@@ -18,7 +18,7 @@ CFG = dict(
     nhead        = 8,
     num_layers   = 4,
     seq_len      = 32,
-    num_actions  = 9,         # Penn Action uses 9 classes
+    num_actions  = 15,        # Penn Action uses 15 classes
 
     # training stage 1
     lr_g         = 1e-4,
@@ -27,7 +27,11 @@ CFG = dict(
     max_epochs_s1= 50,
 
     # training stage 2
-    max_epochs_s2= 30,
+    max_epochs_s2    = 80,
+    lr_s2_backbone   = 1e-5,   # much lower LR for partially-unfrozen ViT layers
+    clips_per_video  = 3,      # multi-clip sampling per video
+    label_smoothing  = 0.1,    # cross-entropy label smoothing
+    warmup_epochs_s2 = 10,     # epochs before partially unfreezing the ViT
 
     # loss weights  (eq. 4 and 5 in paper)
     lambda_lpips = 1.0,

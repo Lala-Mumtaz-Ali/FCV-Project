@@ -14,12 +14,13 @@ def denormalize(tensor):
     img = (tensor.detach().cpu().numpy().transpose(1, 2, 0) + 1.0) / 2.0
     return np.clip(img, 0, 1)
 
-# Available actions:
-# "baseball_pitch", "clean_and_jerk", "pull_ups",
-# "baseball_swing", "golf_swing", "tennis_forehand",
-# "jumping_jacks", "tennis_serve", "squats"
+# Available actions (use EXACTLY these strings as stored in the .mat files):
+# "baseball_pitch", "clean_and_jerk", "pullup",  "strum_guitar",
+# "baseball_swing", "golf_swing",     "pushup",  "tennis_forehand",
+# "bench_press",    "jumping_jacks",  "situp",   "tennis_serve",
+# "bowl",           "jump_rope",      "squat"
 
-TARGET_ACTION = "baseball_swing"  # Change this string to test different actions!
+TARGET_ACTION = "baseball_pitch"
 
 def main():
     torch.set_grad_enabled(False)

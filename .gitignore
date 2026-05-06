@@ -2,5 +2,6 @@ __pycache__/
 venv/
 dataset/
 checkpoints/
+logs/
 *.pyc
 .DS_Store
