@@ -113,8 +113,8 @@ def main():
 
         s2_ckpt_cb = ModelCheckpoint(
             dirpath        = CFG["ckpt_dir"],
-            filename       = "stage2-epoch{epoch:02d}-val_top1{s2/val_top1_epoch:.4f}",
-            monitor        = "s2/val_top1_epoch",
+            filename       = "stage2-epoch{epoch:02d}-val_top1{s2/val_top1:.4f}",
+            monitor        = "s2/val_top1",
             mode           = "max",
             every_n_epochs = 5,
             save_top_k     = -1,
