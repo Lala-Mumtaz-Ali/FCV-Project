@@ -18,8 +18,10 @@ class ActionClassifier(nn.Module):
                  num_actions=15, dropout=0.1):
         super().__init__()
 
-        # Input projection: flatten K keypoints × 2 coords → d_model
+        # Input projection: LayerNorm → Linear → Dropout
+        self.input_norm = nn.LayerNorm(K * 2)
         self.input_proj = nn.Linear(K * 2, d_model)
+        self.input_drop = nn.Dropout(dropout)
 
         # Learnable CLS token prepended to the sequence
         self.cls_token = nn.Parameter(torch.randn(1, 1, d_model))
@@ -61,9 +63,9 @@ class ActionClassifier(nn.Module):
         """
         B, seq_len, K, _ = x.shape
 
-        # Flatten K × 2 → d_model
-        x = x.view(B, seq_len, K * 2)
-        x = self.input_proj(x)                          # (B, seq_len, d_model)
+        # Normalise → project → dropout
+        x = self.input_norm(x.view(B, seq_len, K * 2))
+        x = self.input_drop(self.input_proj(x))         # (B, seq_len, d_model)
 
         # Prepend CLS token
         cls = self.cls_token.expand(B, -1, -1)          # (B, 1, d_model)

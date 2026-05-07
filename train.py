@@ -195,6 +195,30 @@ class Stage2Module(L.LightningModule):
 
         return loss
 
+    # ── Validation step ───────────────────────────────────────────────
+    def validation_step(self, batch, batch_idx):
+        frames = batch["frames"].to(self.device)
+        action = batch["action"].to(self.device)
+
+        B, seq_len, C, H, W = frames.shape
+        keypoints, _ = self.detector(frames.view(B * seq_len, C, H, W))
+        keypoints = keypoints.view(B, seq_len, self.cfg["K"], 2)
+
+        logits = self.classifier(keypoints)
+        loss   = self.loss_fn(logits, action)
+
+        preds = torch.argmax(logits, dim=1)
+        top1  = (preds == action).float().mean()
+        top3  = (torch.topk(logits, k=min(3, self.cfg["num_actions"]),
+                             dim=1).indices
+                 == action.unsqueeze(1)).any(dim=1).float().mean()
+
+        self.log_dict({
+            "s2/val_loss": loss,
+            "s2/val_top1": top1,
+            "s2/val_top3": top3,
+        }, prog_bar=True, on_epoch=True)
+
     # ── Optimiser + scheduler ─────────────────────────────────────────
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(
@@ -202,19 +226,24 @@ class Stage2Module(L.LightningModule):
             lr=self.cfg.get("lr_s2", 1e-4),
             weight_decay=1e-4,
         )
-        # Cosine annealing with warm restarts
-        # T_0: restart every 20 epochs; T_mult=2 doubles the period each cycle
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        warmup  = self.cfg.get("warmup_epochs_s2", 10)
+        total   = self.cfg.get("max_epochs_s2", 80)
+
+        # Linear warmup for the first `warmup` epochs (backbone still frozen),
+        # then cosine decay for the remaining epochs.
+        warmup_sched = torch.optim.lr_scheduler.LinearLR(
+            optimizer, start_factor=0.1, end_factor=1.0, total_iters=warmup
+        )
+        cosine_sched = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=max(total - warmup, 1), eta_min=1e-6
+        )
+        scheduler = torch.optim.lr_scheduler.SequentialLR(
             optimizer,
-            T_0=20,
-            T_mult=2,
-            eta_min=1e-6,
+            schedulers=[warmup_sched, cosine_sched],
+            milestones=[warmup],
         )
         return {
             "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-                "interval": "epoch",
-            },
+            "lr_scheduler": {"scheduler": scheduler, "interval": "epoch"},
         }
 

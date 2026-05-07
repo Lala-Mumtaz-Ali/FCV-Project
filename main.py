@@ -26,10 +26,11 @@ def main():
         )
         train_dl = DataLoader(
             train_ds,
-            batch_size  = CFG["batch_size"],
-            shuffle     = True,
-            num_workers = CFG["num_workers"],
-            pin_memory  = True,
+            batch_size        = CFG["batch_size"],
+            shuffle           = True,
+            num_workers       = CFG["num_workers"],
+            pin_memory        = True,
+            persistent_workers= CFG["num_workers"] > 0,
         )
 
         # Initialize model
@@ -43,7 +44,7 @@ def main():
             monitor        = "s1/g_loss_epoch",
             mode           = "min",
             every_n_epochs = 5,
-            save_top_k     = 3,          # keep the 3 best checkpoints
+            save_top_k     = -1,         # keep every periodic checkpoint
             save_last      = True,
             auto_insert_metric_name = False,
         )
@@ -77,12 +78,24 @@ def main():
             CFG["data_root"], CFG["seq_len"], CFG["img_size"], split="train",
             clips_per_video=CFG.get("clips_per_video", 3),
         )
+        val_ds = VideoSequenceDataset(
+            CFG["data_root"], CFG["seq_len"], CFG["img_size"], split="val",
+        )
         train_dl = DataLoader(
             train_ds,
-            batch_size  = CFG["batch_size"],
-            shuffle     = True,
-            num_workers = CFG["num_workers"],
-            pin_memory  = True,
+            batch_size        = CFG["batch_size"],
+            shuffle           = True,
+            num_workers       = CFG["num_workers"],
+            pin_memory        = True,
+            persistent_workers= CFG["num_workers"] > 0,
+        )
+        val_dl = DataLoader(
+            val_ds,
+            batch_size        = CFG["batch_size"],
+            shuffle           = False,
+            num_workers       = CFG["num_workers"],
+            pin_memory        = True,
+            persistent_workers= CFG["num_workers"] > 0,
         )
 
         # Find the latest Stage 1 checkpoint
@@ -100,11 +113,11 @@ def main():
 
         s2_ckpt_cb = ModelCheckpoint(
             dirpath        = CFG["ckpt_dir"],
-            filename       = "stage2-epoch{epoch:02d}-loss{s2/loss_epoch:.4f}",
-            monitor        = "s2/loss_epoch",
-            mode           = "min",
+            filename       = "stage2-epoch{epoch:02d}-val_top1{s2/val_top1_epoch:.4f}",
+            monitor        = "s2/val_top1_epoch",
+            mode           = "max",
             every_n_epochs = 5,
-            save_top_k     = 3,          # keep the 3 best checkpoints
+            save_top_k     = -1,
             save_last      = True,
             auto_insert_metric_name = False,
         )
@@ -123,9 +136,9 @@ def main():
         if s2_ckpts:
             latest_s2_ckpt = max(s2_ckpts, key=os.path.getmtime)
             print(f"\nResuming Stage 2 from {latest_s2_ckpt}...")
-            trainer_s2.fit(s2_module, train_dl, ckpt_path=latest_s2_ckpt)
+            trainer_s2.fit(s2_module, train_dl, val_dl, ckpt_path=latest_s2_ckpt)
         else:
-            trainer_s2.fit(s2_module, train_dl)
+            trainer_s2.fit(s2_module, train_dl, val_dl)
 
     print("Done ✓ Training complete.")
 

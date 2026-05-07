@@ -142,10 +142,11 @@ class VideoSequenceDataset(Dataset):
       - Consistent spatial augmentation across all frames in a clip (train split only)
     """
     def __init__(self, data_root, seq_len=32, img_size=128, split="train",
-                 clips_per_video=3):
+                 clips_per_video=3, max_stride=2):
         self.img_size        = img_size
         self.seq_len         = seq_len
         self.split           = split
+        self.max_stride      = max_stride   # temporal stride augmentation (train only)
         self.clips_per_video = clips_per_video if split == "train" else 1
         # samples: list of (list_of_all_frame_paths, action_idx)
         # The actual clip window is sampled randomly at __getitem__ time (train)
@@ -208,12 +209,14 @@ class VideoSequenceDataset(Dataset):
         video_dirs = (video_dirs[:int(n * 0.9)] if split == "train"
                       else video_dirs[int(n * 0.9):])
 
+        from collections import defaultdict
+        class_clips = defaultdict(list)
+
         skipped = 0
         for vid in video_dirs:
             vid_path = os.path.join(frames_dir, vid)
             frames   = sorted(os.listdir(vid_path))
 
-            # Need at least 2 frames; short clips are padded in __getitem__
             if len(frames) < 2:
                 skipped += 1
                 continue
@@ -232,12 +235,24 @@ class VideoSequenceDataset(Dataset):
                         action_idx = VideoFramePairDataset.ACTION2IDX[act_str]
 
             all_frame_paths = [os.path.join(vid_path, f) for f in frames]
-            # Store one entry per clip; the clip start is sampled at getitem time
             for _ in range(self.clips_per_video):
-                self.samples.append((all_frame_paths, action_idx))
+                class_clips[action_idx].append((all_frame_paths, action_idx))
 
+        # Oversample minority classes so every class has equal representation
+        if class_clips:
+            max_count = max(len(clips) for clips in class_clips.values())
+            for action_idx, clips in class_clips.items():
+                if len(clips) < max_count:
+                    extras = rng.choices(clips, k=max_count - len(clips))
+                    self.samples.extend(clips + extras)
+                else:
+                    self.samples.extend(clips)
+            rng.shuffle(self.samples)
+
+        n_vids = len(video_dirs) - skipped
         print(f"Built {len(self.samples)} video sequences "
-              f"({len(video_dirs) - skipped} videos × up to {self.clips_per_video} clips; "
+              f"({n_vids} videos × up to {self.clips_per_video} clips, "
+              f"balanced across {len(class_clips)} classes; "
               f"{skipped} videos skipped)")
 
     # ------------------------------------------------------------------
@@ -255,19 +270,28 @@ class VideoSequenceDataset(Dataset):
         all_frame_paths, action_idx = self.samples[idx % len(self.samples)]
         n_frames = len(all_frame_paths)
 
-        # ── Temporal window selection ─────────────────────────────────
+        # ── Temporal window selection with optional stride ────────────
+        import random
+        if self.split == "train" and self.max_stride > 1:
+            stride = random.randint(1, self.max_stride)
+        else:
+            stride = 1
+
+        needed = self.seq_len * stride          # frames needed at this stride
+        if n_frames <= needed:
+            # Too short for the chosen stride — fall back to stride=1
+            stride = 1
+
         if n_frames <= self.seq_len:
-            # Short video: use all frames, pad by looping if needed
             selected = all_frame_paths
         else:
+            span = self.seq_len * stride
             if self.split == "train":
-                # Random start within the valid range
-                import random
-                start = random.randint(0, n_frames - self.seq_len)
+                start = random.randint(0, n_frames - span)
             else:
-                # Validation: always take a centered window for reproducibility
                 start = (n_frames - self.seq_len) // 2
-            selected = all_frame_paths[start: start + self.seq_len]
+                stride = 1                      # val always uses stride=1
+            selected = all_frame_paths[start: start + span: stride]
 
         # ── Pad to seq_len by looping ─────────────────────────────────
         while len(selected) < self.seq_len:
