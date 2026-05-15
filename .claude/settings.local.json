@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(python evaluate.py --stage 1)"
-    ]
-  }
-}

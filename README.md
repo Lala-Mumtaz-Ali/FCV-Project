@@ -91,8 +91,56 @@ Want to physically *see* the discovered keypoints?
   ```
   *(Saves `test_results.png` showing the source frame, target frame, and reconstructed frame)*
 
-- **Test Stage 2 (Action Recognition):** 
+- **Test Stage 2 (Action Recognition — Visual):** 
   ```bash
   python test_stage2.py
   ```
-  *(Saves `stage2_test_results.png` showing the overlaid keypoints across a video sequence and the final predicted action)*. You can open `test_stage2.py` and modify the `TARGET_ACTION` variable to test different sporting actions!
+  This picks 3 validation clips of `tennis_serve` by default and saves two output files:
+  - `stage2_test_tennis_serve.png` — a grid showing 8 evenly-spaced frames per clip with the 40 discovered keypoints overlaid. Each clip row is bordered in **green** if the model predicted correctly, **red** if wrong, and includes a Top-3 confidence bar chart on the right.
+  - `stage2_anim_tennis_serve.gif` — an animated GIF cycling through all 32 frames so you can see the keypoints moving in real time.
+
+  **To test a different action**, pass the `--action` flag with any of the 15 Penn Action class names:
+  ```bash
+  python test_stage2.py --action golf_swing
+  python test_stage2.py --action pushup
+  python test_stage2.py --action jumping_jacks
+  ```
+
+  You can also control how many clips are shown (default is 3):
+  ```bash
+  python test_stage2.py --action squat --clips 5
+  ```
+
+  Valid action names are: `baseball_pitch`, `baseball_swing`, `bench_press`, `bowl`, `clean_and_jerk`, `golf_swing`, `jump_rope`, `jumping_jacks`, `pullup`, `pushup`, `situp`, `squat`, `strum_guitar`, `tennis_forehand`, `tennis_serve`.
+
+### Per-Class Accuracy Breakdown
+Want to see exactly which actions the model is good or bad at?
+
+```bash
+python eval_per_class.py
+```
+
+This runs through the entire validation set and prints a table like:
+
+```
+  Class                     Top-1   Top-3   Total
+  -------------------------------------------------------
+  baseball_pitch            83.3%   95.8%      24
+  tennis_serve              91.7%  100.0%      12
+  pushup                    60.0%   80.0%      15
+  ...
+```
+
+It also saves `eval_per_class.png` — a horizontal bar chart showing Top-1 and Top-3 accuracy for every class side by side, colour-coded green (≥70%), orange (≥40%), or red (<40%) so you can spot weak classes at a glance.
+
+**Options:**
+
+- Use a specific checkpoint instead of the latest one:
+  ```bash
+  python eval_per_class.py --ckpt checkpoints/stage2-epoch79.ckpt
+  ```
+
+- Skip saving the chart (just print the table):
+  ```bash
+  python eval_per_class.py --no-plot
+  ```
