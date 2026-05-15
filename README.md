@@ -60,17 +60,18 @@ Once extracted, place the dataset inside the project directory exactly like this
 
 ```text
 FCV-Project/
-└── Penn_Action/
-    ├── frames/
-    │   ├── 0001/
-    │   │   ├── 000001.jpg
-    │   │   ├── 000002.jpg
-    │   ├── 0002/
-    │   ...
-    └── labels/
-        ├── 0001.mat
-        ├── 0002.mat
-        ...
+└── dataset/
+    └── Penn_Action/
+        ├── frames/
+        │   ├── 0001/
+        │   │   ├── 000001.jpg
+        │   │   ├── 000002.jpg
+        │   ├── 0002/
+        │   ...
+        └── labels/
+            ├── 0001.mat
+            ├── 0002.mat
+            ...
 ```
 *(You can modify the `data_root` path in `config.py` if your dataset is located elsewhere).*
 
