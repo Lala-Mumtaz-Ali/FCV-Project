@@ -37,10 +37,26 @@ Follow these steps to set up the project on your local machine.
    pip install -r requirements.txt
    ```
 
-## 📂 2. Dataset Structure
+## 📂 2. Dataset Setup
 
-This project uses the **Penn Action Dataset**. 
-Before running the code, make sure your dataset is placed in the project directory exactly like this:
+This project uses the **Penn Action Dataset**.
+
+### Download
+Download the dataset from the official source:
+
+**[https://www.cis.upenn.edu/~kostas/Penn_Action.tar.gz](https://www.cis.upenn.edu/~kostas/Penn_Action.tar.gz)**
+
+Then extract it:
+```bash
+# Linux / macOS
+tar -xzf Penn_Action.tar.gz
+
+# Windows (PowerShell)
+tar -xzf Penn_Action.tar.gz
+```
+
+### Folder Structure
+Once extracted, place the dataset inside the project directory exactly like this:
 
 ```text
 FCV-Project/
