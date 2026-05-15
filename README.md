@@ -58,7 +58,38 @@ FCV-Project/
 ```
 *(You can modify the `data_root` path in `config.py` if your dataset is located elsewhere).*
 
-## 🚀 3. How to Run the Pipeline
+## 💾 3. Pre-Trained Checkpoints (Skip Training)
+
+Training from scratch takes several hours. If you just want to run evaluation or the visual tests, you can download our pre-trained checkpoints directly from Google Drive:
+
+**[Download Checkpoints from Google Drive](https://drive.google.com/drive/folders/1XbhTptYVgSAu54H5Byvk9pgO7QAUuand?usp=sharing)**
+
+The folder contains all saved checkpoints from both stages. You only need **two files** — one for each stage:
+
+| Stage | File to download | What it is |
+|-------|-----------------|------------|
+| Stage 1 | `stage1-epoch49-loss0.4976.ckpt` | Best keypoint detector (lowest reconstruction loss) |
+| Stage 2 | `stage2-epoch49-val_top10.4639.ckpt` | Best action classifier (~46% Top-1 accuracy) |
+
+**Setup steps:**
+1. Create a `checkpoints/` folder inside the project if it does not already exist:
+   ```bash
+   mkdir checkpoints
+   ```
+2. Download the two `.ckpt` files above from the Drive folder and place them inside `checkpoints/`:
+   ```text
+   FCV-Project/
+   └── checkpoints/
+       ├── stage1-epoch49-loss0.4976.ckpt
+       └── stage2-epoch49-val_top10.4639.ckpt
+   ```
+3. That's it — all evaluation and testing scripts will automatically detect and use these checkpoints.
+
+> You do **not** need to download the `last.ckpt` or any other files. Only the two files listed above are required.
+
+---
+
+## 🚀 4. How to Run the Pipeline
 
 The entire pipeline is controlled via the `main.py` script.
 
@@ -75,7 +106,7 @@ Once Stage 1 is complete, run the following command to freeze the Keypoint Detec
 python main.py --stage 2
 ```
 
-## 🧪 4. Testing & Evaluation
+## 🧪 5. Testing & Evaluation
 
 ### Evaluate Overall Metrics
 To evaluate the Final Mean Squared Error (MSE) of Stage 1 and the Top-1 Accuracy of Stage 2 on the validation set, run:
